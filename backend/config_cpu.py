@@ -34,7 +34,7 @@ class LoRAConfig:
 @dataclass
 class TrainingConfig:
     """CPU 최적화 훈련 설정"""
-    csv_path: str = "civil_law_qa_dataset.csv"
+    csv_path: str = "civil_law_qa_extended.csv"
     output_dir: str = "./fine_tuned_model_cpu"
 
     # CPU 최적화 배치 설정

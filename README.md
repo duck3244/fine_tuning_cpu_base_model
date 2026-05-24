@@ -1,339 +1,258 @@
-# 🏛️ 민법 부동산 법률 상담 챗봇 (GPT2 Fine-tuning)
+# Fine-tuning CPU MVP
 
-한국어 GPT2 모델을 활용한 민법 부동산 및 전세 관련 법률 상담 챗봇입니다. LoRA(Low-Rank Adaptation)를 사용하여 효율적으로 fine-tuning하며, CPU 및 GPU 환경 모두를 지원합니다.
+> 한국어 KoGPT2 모델을 **CPU만으로** LoRA 파인튜닝하고, FastAPI + React 기반 웹 UI에서 학습·관리·추론까지 한 번에 수행할 수 있는 단일 사용자 MVP. 도메인 예제는 **한국 민법(부동산·전세) Q&A** 입니다.
 
-## 📋 목차
+![demo](demo.png)
 
-- [프로젝트 개요](#-프로젝트-개요)
-- [주요 특징](#-주요-특징)
-- [시스템 요구사항](#-시스템-요구사항)
-- [설치 방법](#-설치-방법)
-- [프로젝트 구조](#-프로젝트-구조)
-- [사용 방법](#-사용-방법)
-- [설정 파일 설명](#-설정-파일-설명)
-- [데이터셋 형식](#-데이터셋-형식)
-- [트러블슈팅](#-트러블슈팅)
+위 캡처는 `학습` 페이지에서 업로드된 데이터셋(`573ddb950753.csv, 128 rows`)으로 `max_steps=100 / batch_size=1 / lr=5e-5 / epochs=1` 설정의 작업을 실행한 모습입니다. 잡 ID `01524a940fd1` 가 `completed` 로 종료되었고, 우측 로그 패널은 백엔드가 SSE 로 실시간 스트리밍한 학습 stdout(시스템 정보 → `skt/kogpt2-base-v2` 로드 단계)을 그대로 보여줍니다.
 
-## 🎯 프로젝트 개요
-
-이 프로젝트는 한국 민법, 특히 부동산 및 전세 관련 법률 질문에 답변하는 AI 챗봇을 구축합니다. **Llama 모델에서 GPT2 모델로 변경**하여 더 가벼운 환경에서도 실행 가능하도록 최적화했습니다.
-
-### 주요 변경사항 (Llama → GPT2)
-
-- **모델**: Meta Llama → skt/kogpt2-base-v2
-- **아키텍처**: Llama → GPT2
-- **타겟 모듈**: `q_proj`, `v_proj` → `c_attn`, `c_proj`
-- **프롬프트 형식**: 복잡한 chat template → 간단한 Q&A 형식
-- **토큰 처리**: 특수 토큰 간소화
+---
 
 ## ✨ 주요 특징
 
-- ✅ **경량 모델**: skt/kogpt2-base-v2 사용으로 리소스 효율성 향상
-- ✅ **LoRA Fine-tuning**: 전체 모델 재학습 대신 일부 파라미터만 학습
-- ✅ **CPU/GPU 지원**: CPU 전용 환경에서도 훈련 및 추론 가능
-- ✅ **대화형 인터페이스**: 실시간 질의응답 기능
-- ✅ **메모리 최적화**: 8bit 양자화 및 그래디언트 누적 지원
-- ✅ **모듈화된 구조**: 재사용 가능한 컴포넌트 설계
+- **GPU 불필요**: CPU 전용 PyTorch + LoRA(`r=8`, target `c_attn`/`c_proj`) + `gradient_accumulation=32` 로 노트북·서버 어디서나 실행.
+- **풀스택 MVP**:
+  - **Backend** — FastAPI 0.115 + uvicorn. 데이터셋·모델·학습잡·추론 4개 라우터.
+  - **Frontend** — React 18 + Vite 5 + TypeScript + Tailwind 3.4 (Node 18 핀).
+  - **CLI 보존** — `main_train_cpu.py` / `main_inference_cpu.py` 는 그대로 살아있어 단독 실행도 가능.
+- **실시간 학습 로그**: 학습은 별도 프로세스(`subprocess.Popen`)로 띄우고, 로그 파일을 `text/event-stream` 으로 푸시 (`EventSource`).
+- **단일 origin 배포**: `npm run build` 결과물을 FastAPI 가 `StaticFiles` 로 마운트하여 API+SPA 동시 서빙.
+- **로컬 완결**: 외부 API 의존 없음. 모든 산출물은 `backend/storage/{datasets,models,logs}/` 에 저장.
 
-## 💻 시스템 요구사항
-
-### GPU 환경
-- **GPU**: NVIDIA RTX 4060 8GB 이상
-- **RAM**: 16GB 이상
-- **디스크**: 20GB 이상 여유 공간
-- **CUDA**: 12.6 이상
-- **Python**: 3.9 이상
-
-### CPU 환경
-- **CPU**: 멀티코어 프로세서 (4코어 이상 권장)
-- **RAM**: 16GB 이상 (32GB 권장)
-- **디스크**: 20GB 이상 여유 공간
-- **Python**: 3.9
-
-⚠️ **CPU 환경 주의사항**: CPU에서는 훈련 속도가 매우 느립니다 (GPU 대비 10~50배). 테스트 및 추론 용도로 권장합니다.
-
-## 📦 설치 방법
-
-### 1. 저장소 클론
-
-```bash
-git clone https://github.com/duck3244/fine_tuning_cpu_base_model.git
-```
-
-### 2. 가상환경 생성 (권장)
-
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
- - Miniconda 3 기준
-  -- C:\Users\User\miniconda3>cd Scripts
-  -- conda create -n py39_tf python=3.9
-  -- conda activate py39_tf
-
-# Linux/Mac
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. 패키지 설치
-
-#### GPU 환경
-
-```bash
-# PyTorch GPU 버전 설치
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# 기타 패키지 설치
-pip install -r requirements.txt
-```
-
-#### CPU 환경 (Windows) - 권장
-
-```bash
-# PyTorch CPU 버전 설치
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# CPU 전용 패키지 설치
-pip install -r requirements_cpu_py39.txt
-```
-
-### 4. 설치 확인
-
-```bash
-python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
-```
+---
 
 ## 📁 프로젝트 구조
 
 ```
-llama_finetune_project/
-├── 📄 config_cpu.py              # CPU 전용 설정 파일 (GPT2)
-├── 📄 data_loader.py             # 데이터 로딩 및 전처리
-├── 📄 model_manager_cpu.py       # CPU 전용 모델 관리
-├── 📄 trainer.py                 # 훈련 관련 유틸리티
-├── 📄 inference_manager.py       # 추론 및 텍스트 생성
-├── 📄 utils.py                   # 공통 유틸리티 함수
-├── 📄 main_train_cpu.py          # CPU 전용 훈련 스크립트
-├── 📄 main_inference_cpu.py      # CPU 전용 추론 스크립트
-├── 📄 requirements.txt           # GPU 패키지 의존성
-├── 📄 requirements_cpu_py39.txt  # CPU 패키지 의존성 (Python 3.9)
-├── 📄 civil_law_qa_dataset.csv   # Q/A 데이터셋
-├── 📄 README.md                  # 프로젝트 설명서
-└── 📁 fine_tuned_model_cpu/      # 훈련된 모델 저장 디렉토리
+fine_tuning_cpu_base_model/
+├── backend/
+│   ├── app/                      # FastAPI 얇은 서빙 레이어
+│   │   ├── main.py               # 앱 엔트리·CORS·라우터·StaticFiles
+│   │   ├── config.py             # 스토리지 경로
+│   │   ├── schemas.py            # Pydantic DTO
+│   │   ├── routes/               # datasets / train / models / infer
+│   │   └── services/             # job_store(메모리), train_runner(subprocess)
+│   ├── main_train_cpu.py         # CLI 학습 엔트리 (subprocess 가 실행)
+│   ├── main_inference_cpu.py     # CLI 추론 엔트리
+│   ├── model_manager_cpu.py      # CPUModelManager / InferenceModelManager
+│   ├── data_loader.py            # CSV → tokenized Dataset
+│   ├── trainer.py                # TrainingManager (HF Trainer)
+│   ├── inference_manager.py      # InferenceManager / ChatBot
+│   ├── config_cpu.py             # ModelConfig / LoRAConfig / TrainingConfig
+│   ├── utils.py                  # 공통 로깅/검증/진행률
+│   ├── requirements_cpu_py39.txt # 학습/추론 코어 의존성
+│   ├── requirements_api.txt      # FastAPI 레이어 추가 의존성
+│   └── storage/                  # 런타임 산출물 (gitignored)
+│       ├── datasets/  <dataset_id>.csv
+│       ├── models/    <job_id>/   ← LoRA 어댑터 + tokenizer
+│       └── logs/      <job_id>.log
+├── frontend/                     # React + Vite + TS + Tailwind
+│   ├── src/
+│   │   ├── App.tsx               # 라우팅·헤더
+│   │   ├── api/client.ts         # fetch 래퍼 + SSE 헬퍼
+│   │   └── pages/                # Dashboard · Train · Evaluate · Models
+│   └── package.json              # Node 18 핀
+├── docs/
+│   ├── ARCHITECTURE.md           # 레이어·데이터 플로우·API 표
+│   └── UML.md                    # Mermaid 컴포넌트/클래스/시퀀스/상태도
+├── demo.png                      # 메인 캡처 (위 이미지)
+└── README.md                     # 본 문서
 ```
 
-## 🚀 사용 방법
+> 자세한 레이어 구조·데이터 플로우는 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), 다이어그램은 [`docs/UML.md`](docs/UML.md) 참고.
 
-### 1. 데이터 준비
+---
 
-`civil_law_qa_dataset.csv` 파일이 프로젝트 루트에 있는지 확인합니다.
+## 💻 시스템 요구사항
+
+| 항목 | 권장 |
+| --- | --- |
+| OS | Linux / macOS / Windows |
+| Python | **3.9** (Conda env 권장, 예: `py39_pt`) |
+| Node.js | **18.x** (`.nvmrc` 고정) |
+| RAM | 16 GB 이상 (32 GB 권장) |
+| 디스크 | 20 GB 이상 여유 공간 |
+| GPU | **불필요** (있어도 사용하지 않음 — `CUDA_VISIBLE_DEVICES=""` 강제) |
+
+> ⚠️ CPU 학습은 느립니다. `max_steps=100` 기준 KoGPT2 + LoRA 가 수 분 ~ 수십 분. 본격 학습보다 **워크플로우 검증·파인튜닝 데모** 용도에 적합합니다.
+
+---
+
+## 📦 설치
+
+### 1) 백엔드 (Python 3.9)
 
 ```bash
-# CSV 파일 검증
-python -c "from utils import validate_csv_file; validate_csv_file('civil_law_qa_dataset.csv')"
+# Conda 예시
+conda create -n py39_pt python=3.9 -y
+conda activate py39_pt
+
+# CPU 전용 PyTorch
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# 학습/추론 코어 + FastAPI 레이어
+cd backend
+pip install -r requirements_cpu_py39.txt
+pip install -r requirements_api.txt
 ```
 
-### 2. 모델 훈련
-
-#### CPU 환경에서 훈련
+### 2) 프론트엔드 (Node 18)
 
 ```bash
+cd frontend
+nvm use            # .nvmrc → 18
+npm install
+```
+
+---
+
+## 🚀 실행
+
+### 개발 모드 (2개 프로세스)
+
+```bash
+# 터미널 A — 백엔드
+cd backend
+uvicorn app.main:app --reload --port 8000
+
+# 터미널 B — 프론트엔드
+cd frontend
+npm run dev        # http://localhost:5173
+```
+
+Vite dev 서버가 5173 에서 뜨고 백엔드 `:8000/api/*` 로 호출합니다. CORS 는 `localhost:5173` 에 대해 허용됩니다.
+
+### 단일 origin 배포 모드
+
+```bash
+cd frontend && npm run build       # → frontend/dist/
+cd ../backend && uvicorn app.main:app --port 8000
+# http://localhost:8000  ← SPA + API 동시 서빙
+```
+
+`app.main` 이 `frontend/dist` 존재를 감지하면 `/` 에 `StaticFiles` 로 마운트합니다.
+
+### CLI 단독 실행 (UI 없이)
+
+```bash
+cd backend
+
+# 학습
 python main_train_cpu.py \
-    --csv_path civil_law_qa_dataset.csv \
-    --output_dir ./fine_tuned_model_cpu \
-    --max_steps 100 \
-    --batch_size 1 \
-    --learning_rate 5e-5
+  --csv_path civil_law_qa_extended.csv \
+  --output_dir ./fine_tuned_model_cpu \
+  --max_steps 100 --batch_size 1 --learning_rate 5e-5
+
+# 대화형 추론
+python main_inference_cpu.py --model_path ./fine_tuned_model_cpu --interactive
+
+# 단일 질문
+python main_inference_cpu.py --model_path ./fine_tuned_model_cpu \
+  --question "전세권이란 무엇인가요?"
 ```
 
-#### 주요 훈련 파라미터
+---
 
-- `--csv_path`: 데이터셋 CSV 파일 경로
-- `--output_dir`: 모델 저장 디렉토리
-- `--max_steps`: 최대 훈련 스텝 수 (CPU는 100 권장)
-- `--batch_size`: 배치 크기 (CPU는 1 권장)
-- `--epochs`: 에폭 수 (CPU는 1 권장)
-- `--learning_rate`: 학습률 (기본값: 5e-5)
+## 🖥️ 웹 UI 사용 흐름
 
-#### 설정 검증만 실행 (Dry Run)
+| 페이지 | 역할 |
+| --- | --- |
+| **대시보드** | 최근 학습 잡 5건, 저장된 모델 5건 요약 |
+| **학습** | CSV 업로드 → 하이퍼파라미터 입력 → `학습 시작` → 실시간 로그 SSE 스트림 → 완료 시 `completed` 배지 (위 데모 캡처와 동일) |
+| **평가** | 모델 선택 + 질문 입력 → `POST /api/infer` 호출 (모델은 첫 호출 후 메모리 캐시) → 답변과 `elapsed_ms` 표시 |
+| **모델** | 저장된 LoRA 어댑터 목록 / 삭제 |
 
-```bash
-python main_train_cpu.py --dry_run
-```
+---
 
-### 3. 모델 추론
+## 🔌 주요 API
 
-#### 대화형 모드
+| Method | Path | 설명 |
+| --- | --- | --- |
+| `GET`  | `/api/health` | liveness |
+| `GET`  | `/api/datasets` | 데이터셋 목록 |
+| `POST` | `/api/datasets/upload` | CSV 업로드 (multipart, `question`/`answer` 컬럼 필수) |
+| `DELETE` | `/api/datasets/{id}` | 데이터셋 삭제 |
+| `POST` | `/api/train` | 학습 시작 (동시 1개 제한, 409) |
+| `GET`  | `/api/train/jobs` | 잡 목록 |
+| `GET`  | `/api/train/jobs/{id}` | 잡 상태 조회 |
+| `POST` | `/api/train/jobs/{id}/stop` | SIGTERM 으로 학습 중단 |
+| `GET`  | `/api/train/jobs/{id}/stream` | SSE 로그 스트림 (`event: end` 로 종료) |
+| `GET`  | `/api/models` | 어댑터 보유 디렉터리 목록 |
+| `DELETE` | `/api/models/{id}` | 모델 삭제 (`rmtree`) |
+| `POST` | `/api/infer` | 질의응답 (`{model_id, question, max_new_tokens, temperature}`) |
 
-```bash
-python main_inference_cpu.py \
-    --model_path ./fine_tuned_model_cpu \
-    --interactive
-```
+> 자세한 시퀀스·상태 전이 다이어그램은 [`docs/UML.md`](docs/UML.md) 의 §5–§8 참고.
 
-#### 단일 질문
-
-```bash
-python main_inference_cpu.py \
-    --model_path ./fine_tuned_model_cpu \
-    --question "전세권이란 무엇인가요?"
-```
-
-#### 빠른 테스트
-
-```bash
-python main_inference_cpu.py \
-    --model_path ./fine_tuned_model_cpu \
-    --quick_test
-```
-
-#### 주요 추론 파라미터
-
-- `--model_path`: Fine-tuned 모델 경로
-- `--interactive`: 대화형 모드 실행
-- `--question`: 단일 질문 입력
-- `--quick_test`: 빠른 테스트 실행
-- `--max_new_tokens`: 최대 생성 토큰 수 (기본값: 256)
-- `--temperature`: 생성 온도 (기본값: 0.8)
-
-## ⚙️ 설정 파일 설명
-
-### config_cpu.py
-
-GPT2 모델용 CPU 최적화 설정 파일입니다.
-
-```python
-# 모델 설정
-model_name = "skt/kogpt2-base-v2"  # 한국어 GPT2
-max_length = 256                    # 시퀀스 길이
-torch_dtype = torch.float32         # CPU는 float32
-
-# LoRA 설정
-r = 8                               # LoRA rank (감소)
-lora_alpha = 16                     # 스케일링 팩터
-target_modules = ["c_attn", "c_proj"]  # GPT2 타겟 모듈
-
-# 훈련 설정
-batch_size = 1                      # 최소 배치
-gradient_accumulation_steps = 32    # 효과적 배치 = 32
-max_steps = 100                     # CPU 최적화
-```
-
-### 프롬프트 형식 변경
-
-**이전 (Llama)**:
-```
-<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-당신은 한국 민법 전문가입니다.
-<|start_header_id|>user<|end_header_id|>
-질문내용
-<|start_header_id|>assistant<|end_header_id|>
-답변내용
-```
-
-**현재 (GPT2)**:
-```
-질문: 질문내용
-답변: 답변내용</s>
-```
+---
 
 ## 📊 데이터셋 형식
 
-CSV 파일은 다음 컬럼을 포함해야 합니다:
+UTF-8 CSV 파일이며 다음 두 컬럼이 **필수**입니다.
 
 | 컬럼 | 필수 | 설명 |
-|------|------|------|
-| question | ✅ | 질문 내용 |
-| answer | ✅ | 답변 내용 |
-| category | ❌ | 카테고리 (선택) |
-| difficulty | ❌ | 난이도 (선택) |
+| ------ | ------ | ------ |
+| `question` | ✅ | 질문 |
+| `answer`   | ✅ | 정답 |
+| (기타)     | ❌ | category 등은 무시됨 |
 
-### 예시
+업로드 시점에 처음 5행을 검증하여 누락된 컬럼이 있으면 400 으로 반환됩니다. 학습 시에는 `format_prompt()` 가 다음과 같이 변환합니다.
 
-```csv
-question,answer,category,difficulty
-"전세권이란 무엇인가요?","전세권은 전세금을 지급하고 타인의 부동산을 점유하여 그 부동산의 용도에 맞게 사용·수익하며, 후에 그 부동산 전부에 대하여 후순위권리자 기타 채권자보다 전세금의 우선변제를 받을 수 있는 권리입니다.",부동산물권,초급
+```text
+질문: {question}
+답변: {answer}</s>
 ```
+
+---
+
+## ⚙️ 핵심 설정 (`backend/config_cpu.py`)
+
+| 그룹 | 키 | 기본값 |
+| --- | --- | --- |
+| Model | `model_name` | `skt/kogpt2-base-v2` |
+| Model | `max_length` | 256 |
+| Model | `torch_dtype` | `float32` |
+| LoRA  | `r` / `lora_alpha` / `dropout` | 8 / 16 / 0.1 |
+| LoRA  | `target_modules` | `["c_attn", "c_proj"]` |
+| Train | `batch_size` / `gradient_accumulation_steps` | 1 / 32 |
+| Train | `learning_rate` / `max_steps` / `epochs` | 5e-5 / 100 / 1 |
+| Train | `fp16` / `gradient_checkpointing` | False / False (CPU 강제) |
+| Infer | `max_new_tokens` / `temperature` / `top_p` | 256 / 0.8 / 0.9 |
+
+---
+
+## 🧠 모델·LoRA 개요
+
+- **베이스 모델**: [`skt/kogpt2-base-v2`](https://huggingface.co/skt/kogpt2-base-v2) — 한국어 GPT-2 (~125M params).
+- **LoRA 어댑터**: HF PEFT 로 `c_attn`, `c_proj` 에 부착, 학습 가능 파라미터를 수십만 수준으로 압축.
+- **추론 시**: base model 을 로드한 뒤 `PeftModel.from_pretrained(base, adapter_path)` 로 어댑터 결합. 모델은 라우터 내 `_cache` 에 `model_id` 키로 캐싱됩니다.
+
+---
 
 ## 🔧 트러블슈팅
 
-### 1. GPU 메모리 부족
+| 증상 | 원인/대처 |
+| --- | --- |
+| `409 Another training job is already running` | 동시 학습 1개 제한. 진행 중 잡을 `학습` 페이지에서 중단하거나 종료 대기 |
+| 학습은 끝났는데 모델이 안 보임 | `storage/models/<job_id>/adapter_config.json` 존재 여부 확인 (없으면 학습이 어댑터 저장 직전에 실패한 것) |
+| 추론에서 옛 모델 응답이 그대로 나옴 | 같은 `model_id` 캐시 잔존. 백엔드 재기동(`uvicorn`) 으로 캐시 초기화 |
+| 토크나이저 경고 (`pad_token`) | KoGPT2 는 기본 `pad_token` 이 없어 코드에서 `eos_token` 으로 설정 — 무시 가능 |
+| CPU 학습 너무 느림 | `--max_steps 50` 등으로 감소 / 작은 CSV 로 우선 워크플로우 검증 |
+| 모듈 import 오류 | `requirements_cpu_py39.txt` + `requirements_api.txt` 둘 다 설치했는지 확인 |
 
-```bash
-# config_cpu.py에서 배치 크기 줄이기
-batch_size = 1
-gradient_accumulation_steps = 32
-```
+학습 로그는 두 곳에서 확인 가능합니다.
 
-### 2. CPU 훈련이 너무 느림
-
-```bash
-# max_steps 제한
-python main_train_cpu.py --max_steps 50
-```
-
-### 3. 모듈을 찾을 수 없음 오류
-
-```bash
-# 패키지 재설치
-pip install --upgrade -r requirements_cpu_py39.txt
-```
-
-### 4. 토크나이저 오류
-
-GPT2 모델은 특별한 토큰 설정이 간단합니다:
-- `pad_token = eos_token`
-- `bos_token = eos_token`
-
-### 5. 추론 결과가 이상함
-
-```bash
-# 생성 파라미터 조정
-python main_inference_cpu.py \
-    --temperature 0.7 \
-    --max_new_tokens 512
-```
-
-## 📈 성능 최적화 팁
-
-### CPU 환경
-
-1. **스레드 수 최적화**: `config_cpu.py`에서 자동 설정됨
-2. **배치 크기 최소화**: `batch_size=1`
-3. **그래디언트 누적**: `gradient_accumulation_steps=32`
-4. **스텝 수 제한**: `max_steps=100`
-
-### 메모리 절약
-
-1. **시퀀스 길이 감소**: `max_length=256`
-2. **LoRA rank 감소**: `r=8`
-3. **불필요한 로그 제거**: `report_to=None`
-
-## 🎓 모델 정보
-
-### GPT2 vs Llama 비교
-
-| 특징 | GPT2 | Llama |
-|------|------|-------|
-| 모델 크기 | ~500MB | ~13GB |
-| 메모리 요구량 | 낮음 | 높음 |
-| 훈련 속도 | 빠름 | 느림 |
-| 한국어 성능 | 우수 (skt/kogpt2) | 우수 |
-| 추론 속도 | 매우 빠름 | 느림 |
-
-### LoRA 파라미터
-
-- **rank (r)**: 8 (Llama: 16)
-- **alpha**: 16 (Llama: 32)
-- **타겟 모듈**: `c_attn`, `c_proj` (GPT2 attention 레이어)
-
-## 📝 로그 파일
-
-훈련 및 추론 시 자동으로 로그 파일이 생성됩니다:
-
-- `training_cpu_YYYYMMDD_HHMMSS.log`
-- `inference_cpu_YYYYMMDD_HHMMSS.log`
+- `backend/storage/logs/<job_id>.log` (백엔드가 작성)
+- `backend/training_cpu_YYYYMMDD_HHMMSS.log` (CLI 단독 실행 시 추가 생성)
 
 ---
+
+## 📚 추가 문서
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 레이어·플로우·API·동시성 모델
+- [`docs/UML.md`](docs/UML.md) — Mermaid 다이어그램 10종 (컴포넌트·클래스·시퀀스·상태·액티비티·배포)
+
+---
+
+## 📝 라이선스
+
+[LICENSE](LICENSE) 참조.

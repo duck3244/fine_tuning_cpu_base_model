@@ -8,7 +8,7 @@ from datasets import Dataset
 from typing import Dict, List
 from transformers import PreTrainedTokenizer
 
-from config_cpu import format_prompt, training_config
+from config_cpu import format_prompt, training_config, model_config
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class DataLoader:
 def create_data_loader(tokenizer: PreTrainedTokenizer, max_length: int = None) -> DataLoader:
     """DataLoader 인스턴스 생성"""
     if max_length is None:
-        max_length = training_config.batch_size
+        max_length = model_config.max_length
 
     return DataLoader(tokenizer, max_length)
 
